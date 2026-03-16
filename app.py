@@ -7,12 +7,9 @@ import matplotlib.pyplot as plt
 st.set_page_config(page_title="Kutup İklim Tahmini", layout="wide")
 
 st.title("❄️ Kutup İklimi ve Küresel Isınma Tahmin Paneli")
-st.markdown("Değerleri sol taraftaki kutucuklara girerek beklenen sıcaklık değişimini hesaplayabilirsiniz.")
 
-# 1. VERİLERİ YÜKLEME
 @st.cache_data
 def verileri_yukle():
-    # Dosya isimleri
     df_buz = pd.read_excel('Sea_Ice_Index_Monthly_Data_by_Year_G02135_v4.0.xlsx')
     df_co2 = pd.read_csv('co2_annmean_mlo.txt', sep=r'\s+', comment='#', header=None, names=['Year', 'Mean'])
     df_sicaklik = pd.read_csv('sıcaklık ZonAnn.Ts+dSST (1).csv')
@@ -21,60 +18,49 @@ def verileri_yukle():
 try:
     df_buz, df_co2, df_sicaklik = verileri_yukle()
 
-    # VERİ DÜZENLEME - GARANTİ YÖNTEM
-    # Buz verisi: İlk sütun yıl, 'Annual' sütunu buz miktarı
-    df_buz_clean = pd.DataFrame({
-        'Year': df_buz.iloc[:, 0].astype(int),
-        'Ice_Extent': df_buz['Annual'].astype(float)
-    })
-    
-    # Sıcaklık verisi: 'Year' ve 'Glob' sütunları
-    df_sicaklik_clean = pd.DataFrame({
-        'Year': df_sicaklik['Year'].astype(int),
-        'Temp_Anom': df_sicaklik['Glob'].astype(float)
-    })
+    # 1. VERİ TEMİZLEME (Yılları Sayıya Çevirme)
+    df_buz['Year'] = pd.to_numeric(df_buz.iloc[:, 0], errors='coerce')
+    df_co2['Year'] = pd.to_numeric(df_co2['Year'], errors='coerce')
+    df_sicaklik['Year'] = pd.to_numeric(df_sicaklik['Year'], errors='coerce')
 
-    # CO2 verisi zaten düzgün, sadece yılı tam sayı yapalım
-    df_co2['Year'] = df_co2['Year'].astype(int)
+    # Boş yılları temizle
+    df_buz = df_buz.dropna(subset=['Year'])
+    df_co2 = df_co2.dropna(subset=['Year'])
+    df_sicaklik = df_sicaklik.dropna(subset=['Year'])
 
-    # TÜM VERİLERİ BİRLEŞTİRME (Ortak yıllara göre)
-    data = pd.merge(df_co2, df_buz_clean, on='Year')
-    data = pd.merge(data, df_sicaklik_clean, on='Year')
+    # 2. BİRLEŞTİRME (Explicit Inner Join)
+    # Önce CO2 ve Sıcaklık
+    data = pd.merge(df_co2, df_sicaklik[['Year', 'Glob']], on='Year', how='inner')
+    # Sonra Buz verisi (Buz verisindeki 'Annual' sütununu alıyoruz)
+    data = pd.merge(data, df_buz[['Year', 'Annual']], on='Year', how='inner')
+    data = data.rename(columns={'Annual': 'Ice_Extent', 'Glob': 'Temp_Anom'})
 
     if data.empty:
-        st.error("Veriler birleştirilemedi. Dosya içeriklerindeki yıllar eşleşmiyor.")
+        st.error("⚠️ Veriler birleştirilemedi! Yıllar eşleşmiyor.")
+        st.write("CO2 Yılları:", df_co2['Year'].min(), "-", df_co2['Year'].max())
+        st.write("Buz Yılları:", df_buz['Year'].min(), "-", df_buz['Year'].max())
     else:
-        # 2. MODEL EĞİTİMİ
+        # 3. MODEL EĞİTİMİ
         X = data[['Mean', 'Ice_Extent']]
         y = data['Temp_Anom']
         model = LinearRegression()
         model.fit(X, y)
 
-        # 3. KUTUCUKLAR (Input Boxes) - Yan tarafta
+        # 4. KUTUCUKLAR
         st.sidebar.header("🎛️ Tahmin Parametreleri")
+        input_co2 = st.sidebar.number_input("Atmosferik CO2 (ppm):", 300.0, 500.0, 415.0)
+        input_ice = st.sidebar.number_input("Deniz Buzu (Milyon km²):", 5.0, 15.0, 10.0)
         
-        input_co2 = st.sidebar.number_input("Atmosferik CO2 (ppm):", min_value=300.0, max_value=500.0, value=415.0, step=0.1)
-        input_ice = st.sidebar.number_input("Deniz Buzu (Milyon km²):", min_value=5.0, max_value=15.0, value=10.0, step=0.1)
+        tahmin = model.predict([[input_co2, input_ice]])[0]
+
+        # 5. EKRANA YAZDIRMA
+        col1, col2 = st.columns(2)
+        col1.metric("Tahmin Edilen Sıcaklık Artışı", f"{tahmin:.3f} °C")
         
-        # Tahmin hesaplama
-        tahmin_sonuc = model.predict([[input_co2, input_ice]])[0]
-
-        # 4. GÖRSELLEŞTİRME VE SONUÇ
-        col1, col2 = st.columns([1, 2])
-
-        with col1:
-            st.subheader("🤖 Tahmin Sonucu")
-            st.metric(label="Tahmin Edilen Sıcaklık Artışı", value=f"{tahmin_sonuc:.3f} °C")
-            st.info(f"CO2: {input_co2} ppm\n\nBuz: {input_ice} M km²")
-
-        with col2:
-            st.subheader("📈 Tarihsel Sıcaklık Değişimi")
-            fig, ax = plt.subplots(figsize=(10, 5))
-            ax.plot(data['Year'], data['Temp_Anom'], color='#e74c3c', linewidth=2, marker='o', markersize=4, label='Sıcaklık Artışı')
-            ax.set_xlabel("Yıl")
-            ax.set_ylabel("Sıcaklık Değişimi (°C)")
-            ax.grid(True, alpha=0.3)
-            st.pyplot(fig)
+        fig, ax = plt.subplots()
+        ax.scatter(data['Year'], data['Temp_Anom'], color='red')
+        ax.set_title("Yıllara Göre Sıcaklık Değişimi")
+        st.pyplot(fig)
 
 except Exception as e:
-    st.error(f"Bir hata oluştu: {e}")
+    st.error(f"Hata: {e}")
