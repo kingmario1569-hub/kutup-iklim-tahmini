@@ -11,9 +11,9 @@ st.markdown("Bu uygulama, NASA ve NSIDC verilerini kullanarak makine öğrenmesi
 # 2. VERİLERİ YÜKLE VE TEMİZLE (Colab'daki mevcut dosyalarını okur)
 @st.cache_data
 def verileri_hazirla():
-    df_buz = pd.read_excel('/content/Sea_Ice_Index_Monthly_Data_by_Year_G02135_v4.0.xlsx').rename(columns={'Unnamed: 0': 'Year'})
-    df_co2 = pd.read_csv('/content/co2_annmean_mlo.txt', sep=r'\s+', comment='#', header=None, names=['Year', 'Mean', 'Uncertainty'])
-    df_sicaklik = pd.read_csv('/content/sıcaklık ZonAnn.Ts+dSST (1).csv')
+    df_buz = pd.read_excel('Sea_Ice_Index_Monthly_Data_by_Year_G02135_v4.0.xlsx').rename(columns={'Unnamed: 0': 'Year'})
+    df_co2 = pd.read_csv('co2_annmean_mlo.txt', sep=r'\s+', comment='#', header=None, names=['Year', 'Mean', 'Uncertainty'])
+    df_sicaklik = pd.read_csv('sıcaklık ZonAnn.Ts+dSST (1).csv')
     
     # Birleştirme (Senin dediğin gibi yılları eşitliyoruz)
     ara_tablo = pd.merge(df_buz[['Year', 'Annual']], df_co2[['Year', 'Mean']], on='Year')
