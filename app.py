@@ -3,64 +3,83 @@ import pandas as pd
 from sklearn.linear_model import LinearRegression
 import matplotlib.pyplot as plt
 
-st.set_page_config(page_title="Kutup İklim Tahmini", layout="wide")
-st.title("❄️ Kutup İklimi ve Küresel Isınma Tahmin Paneli")
+st.set_page_config(page_title="10 Yıllık İklim Tahmini", layout="wide")
+
+# Görsel stil ayarları (Kutucukları biraz daha belirgin yapar)
+st.markdown("""
+    <style>
+    .stNumberInput {border: 2px solid #3498db; border-radius: 5px;}
+    </style>
+    """, unsafe_allow_html=True)
+
+st.title("❄️ 10 Yıllık Küresel Isınma Projeksiyonu")
 
 @st.cache_data
 def verileri_yukle():
-    # CO2 dosyasını doğru sütunlarla okuyalım (İlk sütun yıl, ikinci sütun değer)
     df_co2 = pd.read_csv('co2_annmean_mlo.txt', sep=r'\s+', comment='#', header=None)
-    df_co2.columns = ['Year', 'Mean', 'Unused'] # İlk iki sütunu aldık
-    
+    df_co2.columns = ['Year', 'Mean', 'Unused']
     df_buz = pd.read_excel('Sea_Ice_Index_Monthly_Data_by_Year_G02135_v4.0.xlsx')
     df_sicaklik = pd.read_csv('sıcaklık ZonAnn.Ts+dSST (1).csv')
     return df_buz, df_co2, df_sicaklik
 
 try:
     df_buz, df_co2, df_sicaklik = verileri_yukle()
-
-    # Veri Tiplerini Zorla Düzenle
-    df_co2['Year'] = pd.to_numeric(df_co2['Year'], errors='coerce').astype(float).fillna(0).astype(int)
-    df_buz['Year'] = pd.to_numeric(df_buz.iloc[:, 0], errors='coerce').fillna(0).astype(int)
-    df_sicaklik['Year'] = pd.to_numeric(df_sicaklik['Year'], errors='coerce').fillna(0).astype(int)
-
-    # Birleştirme (Inner Join)
-    # Önce CO2 ve Sıcaklık
-    data = pd.merge(df_co2[['Year', 'Mean']], df_sicaklik[['Year', 'Glob']], on='Year', how='inner')
-    # Sonra Buz (Annual sütunu)
-    data = pd.merge(data, df_buz[['Year', 'Annual']], on='Year', how='inner')
     
-    data = data.rename(columns={'Mean': 'CO2', 'Annual': 'Ice_Extent', 'Glob': 'Temp_Anom'})
+    # Veri Hazırlama
+    df_co2['Year'] = df_co2['Year'].astype(int)
+    df_buz['Year'] = pd.to_numeric(df_buz.iloc[:, 0], errors='coerce').fillna(0).astype(int)
+    df_sicaklik['Year'] = df_sicaklik['Year'].astype(int)
 
-    if data.empty:
-        st.error("⚠️ Veriler eşleşemedi. Lütfen dosyaları kontrol edin.")
-        # Debug bilgisi
-        st.write("CO2 Dosyasından okunan ilk 3 yıl:", df_co2['Year'].head(3).values)
-        st.write("Buz Dosyasından okunan ilk 3 yıl:", df_buz['Year'].head(3).values)
-    else:
-        # MODEL EĞİTİMİ
-        X = data[['CO2', 'Ice_Extent']]
-        y = data['Temp_Anom']
-        model = LinearRegression().fit(X, y)
+    # Birleştirme
+    data = pd.merge(df_co2[['Year', 'Mean']], df_sicaklik[['Year', 'Glob']], on='Year')
+    data = pd.merge(data, df_buz[['Year', 'Annual']], on='Year')
+    data.columns = ['Year', 'CO2', 'Temp', 'Ice']
 
-        # ARAYÜZ
-        st.sidebar.header("🎛️ Tahmin Parametreleri")
-        input_co2 = st.sidebar.number_input("Atmosferik CO2 (ppm):", 300.0, 550.0, 415.0)
-        input_ice = st.sidebar.number_input("Deniz Buzu (Milyon km²):", 5.0, 15.0, 10.0)
+    # --- 10 YIL SONRASI İÇİN MODELLEME ---
+    # Modelimizi "Bugünkü veriler -> 10 yıl sonraki sıcaklık" şeklinde eğitiyoruz
+    data['Target_Temp'] = data['Temp'].shift(-10) # 10 yıl sonrasının sıcaklığını hedef yap
+    train_data = data.dropna() # Boş satırları (son 10 yılı) temizle
+
+    X = train_data[['CO2', 'Temp', 'Ice']]
+    y = train_data['Target_Temp']
+    model = LinearRegression().fit(X, y)
+
+    # --- YAN PANEL: 3 ANA GİRDİ ---
+    st.sidebar.header("📡 Güncel Verileri Girin")
+    st.sidebar.info("Girdiğiniz değerlere dayanarak 10 yıl sonrası tahmin edilir.")
+    
+    # İstediğin 3 Girdi Kutucuğu
+    guncel_co2 = st.sidebar.number_input("Güncel CO2 Seviyesi (ppm):", 300.0, 600.0, 420.0, help="Şu anki atmosferik CO2")
+    guncel_sicaklik = st.sidebar.number_input("Güncel Sıcaklık Artışı (°C):", -1.0, 3.0, 1.2, help="Şu anki küresel sıcaklık farkı")
+    guncel_buz = st.sidebar.number_input("Güncel Buz Miktarı (M km²):", 5.0, 15.0, 10.2, help="Şu anki deniz buzu kütlesi")
+
+    # Tahmin Hesaplama
+    tahmin_10_yil = model.predict([[guncel_co2, guncel_sicaklik, guncel_buz]])[0]
+
+    # --- SONUÇ EKRANI ---
+    col1, col2 = st.columns([1, 1])
+    
+    with col1:
+        st.subheader("🔮 10 Yıl Sonraki Durum")
+        st.write("Yapay zeka modelimiz, girdiğiniz parametrelerin 10 yıl sonraki etkisini hesapladı:")
+        st.metric(label="Tahmini Sıcaklık Artışı (2036 Tahmini)", value=f"{tahmin_10_yil:.3f} °C", delta=f"{tahmin_10_yil - guncel_sicaklik:.3f} °C Değişim")
         
-        tahmin = model.predict([[input_co2, input_ice]])[0]
+        if tahmin_10_yil > 1.5:
+            st.warning("⚠️ Tahmin, 1.5°C kritik eşiğinin üzerinde!")
+        else:
+            st.success("✅ Tahmin, kritik sınırların altında görünüyor.")
 
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            st.subheader("🤖 Sonuç")
-            st.metric("Tahmin Edilen Sıcaklık Artışı", f"{tahmin:.3f} °C")
-        
-        with col2:
-            st.subheader("📈 Sıcaklık Trendi")
-            fig, ax = plt.subplots(figsize=(8, 4))
-            ax.plot(data['Year'], data['Temp_Anom'], 'r-o', label="Gözlemlenen")
-            ax.set_xlabel("Yıl"); ax.set_ylabel("Artış (°C)")
-            st.pyplot(fig)
+    with col2:
+        st.subheader("📊 Tarihsel Veri Seti")
+        st.dataframe(data.tail(10), use_container_width=True)
+
+    # Grafik
+    st.subheader("📈 Zaman İçindeki Değişim")
+    fig, ax = plt.subplots(figsize=(10, 4))
+    ax.plot(data['Year'], data['Temp'], label="Geçmiş Sıcaklık", color='red')
+    ax.set_xlabel("Yıl")
+    ax.set_ylabel("Sıcaklık (°C)")
+    st.pyplot(fig)
 
 except Exception as e:
-    st.error(f"Hata detayı: {e}")
+    st.error(f"Bir hata oluştu: {e}")
